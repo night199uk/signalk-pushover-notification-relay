@@ -19,7 +19,8 @@ module.exports = function (app) {
   var unsubscribes = [];
   var plugin = {};
   var last_states = {};
-  var watchList = new Map();
+  var watchList = [];
+  var watchAll = false;
   var vesselName = 'vessels.self';
   var api_user = '';
   var api_key = '';
@@ -48,26 +49,62 @@ module.exports = function (app) {
     };
   }
 
-  // Full notification path -> { levels, sound }. An empty map means
-  // "relay every notifications.* path at every level", which is what an
-  // empty notifications list asks for.
+  // Ordered list of { matcher, levels, sound }. The first entry whose
+  // matcher accepts a notification supplies its levels and sound, so a
+  // specific entry listed above a general one wins.
   function build_watch_list(config) {
 
-    var list = new Map();
+    return config.notifications.map(function (n) {
 
-    config.notifications.forEach(function (n) {
-
-      list.set(NOTIFICATION_PREFIX + n.path, {
+      return {
+        matcher: compile_path_matcher(n.path),
         levels: Array.isArray(n.levels) && n.levels.length > 0
           ? n.levels
           : DEFAULT_LEVELS,
         sound: typeof n.sound === 'string' && n.sound.length > 0
           ? n.sound
           : null
-      });
+      };
     });
+  }
 
-    return list;
+  function escape_literal(text) {
+
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // A configured path is matched against the notification path with the
+  // leading "notifications." removed, so it always reads the way it does in
+  // the admin UI. `*` is the only wildcard and stands for any run of
+  // characters, dots included, which is the same thing signalk-server's own
+  // subscription path matching does:
+  //
+  //   navigation       notifications.navigation and nothing below it
+  //   navigation.*     notifications.navigation.anchor, .anchor.dragging, ...
+  //
+  // Every other character is literal, so a path containing a dot or any other
+  // regular expression metacharacter matches only itself.
+  function compile_path_matcher(configuredPath) {
+
+    var glob = configuredPath.split('*').map(escape_literal).join('.*');
+
+    return new RegExp(`^${glob}$`);
+  }
+
+  function match_watch(path) {
+
+    var relative = path.indexOf(NOTIFICATION_PREFIX) === 0
+      ? path.slice(NOTIFICATION_PREFIX.length)
+      : path;
+
+    for (var i = 0; i < watchList.length; i++) {
+
+      if (watchList[i].matcher.test(relative)) {
+        return watchList[i];
+      }
+    }
+
+    return null;
   }
 
   plugin.start = function (options, restartPlugin) {
@@ -84,6 +121,7 @@ module.exports = function (app) {
     api_user = config.api_user;
     api_key = config.api_key;
     watchList = build_watch_list(config);
+    watchAll = config.notifications.length === 0;
 
     vesselName = app.getSelfPath('name') || 'vessels.self';
 
@@ -93,30 +131,25 @@ module.exports = function (app) {
       return;
     }
 
-    var subscribes = [];
-
-    if (config.notifications.length === 0) {
-
-      // signalk-server compiles a subscription path to a regular
-      // expression, so this single row already covers nested paths such
-      // as notifications.navigation.anchor.
-      subscribes.push({
-        path: `${NOTIFICATION_PREFIX}*`,
-        policy: 'instant'
-      });
-    } else {
-      config.notifications.forEach(function (n) {
-
-        subscribes.push({
-          path: NOTIFICATION_PREFIX + n.path,
-          policy: 'instant'
-        });
-      });
-    }
-
+    // One subscription row per configured path, which signalk-server matches
+    // as a glob in exactly the way the watch list above does. An empty
+    // list asks for everything. Rows may overlap, for instance a
+    // "navigation.*" alongside a "navigation"; a notification then arrives
+    // twice, and the state change check drops the repeat.
     let command = {
       context: 'vessels.self',
-      subscribe: subscribes
+      subscribe: config.notifications.length === 0
+        ? [{
+          path: `${NOTIFICATION_PREFIX}*`,
+          policy: 'instant'
+        }]
+        : config.notifications.map(function (n) {
+
+          return {
+            path: NOTIFICATION_PREFIX + n.path,
+            policy: 'instant'
+          };
+        })
     };
 
     app.debug('Subscribe command: ' + JSON.stringify(command, null, 2));
@@ -196,7 +229,14 @@ module.exports = function (app) {
       return;
     }
 
-    var watched = watchList.get(pathValue.path);
+    var watched = match_watch(pathValue.path);
+
+    // A populated list is a filter, so a notification it does not match is
+    // not ours. An empty list asked for everything.
+    if (!watched && !watchAll) {
+      return;
+    }
+
     var levels = watched ? watched.levels : DEFAULT_LEVELS;
 
     if (levels.indexOf(state) === -1) {
@@ -329,7 +369,7 @@ module.exports = function (app) {
             path: {
               type: 'string',
               title: 'Notification path',
-              description: 'The part that comes after \'notification.\' eg: navigation.anchor'
+              description: 'The part that comes after \'notifications.\' eg: navigation.anchor. A * stands for any run of characters, dots included: navigation matches only notifications.navigation, while navigation.* matches everything under notifications.navigation. The first entry that matches a notification decides its levels and sound, so put the specific entries above the general ones.'
             },
             sound: {
               type: 'string',
