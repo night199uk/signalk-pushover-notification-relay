@@ -4,8 +4,11 @@ Signalk-node-server plugin that pushes listens for change of state in SignalK no
 
 # About Pushover
 
+<img src="pushover-wordmark.png" height="26" alt="Pushover">
+
 Pushover (no affiliation with the author or this software) makes it easy to get real-time notifications on your Android, iPhone, iPad, and Desktop (Android Wear and Apple Watch, too!).
 This plugin uses it to forward your notifications to your mobile phone via push message.
+This plugin is not written or supported by Pushover. It is an independent integration that uses their public API.
 Pushover is a commercial service and you will need to pay a fee. You can get started for free however, you will be given a trial period for testing when you sign up.
 
 # Installation
@@ -53,3 +56,7 @@ When more than one entry matches a notification, the **first** one wins, and sup
 Favouring globs over long lists of individual paths is also a little faster: every configured path becomes its own subscription, and a vessel with a few hundred notifications is better served by ten globs than by two hundred rows.
 
 That's it.
+
+# Trademarks
+
+Pushover is a trademark of Pushover, LLC. The Pushover wordmark above is used to indicate that this plugin integrates with that service, and is neither modified nor used as this plugin's own icon, in line with their [logo usage terms](https://support.pushover.net/i63-pushover-logos-and-usage). The plugin icon in `icon.png` is original artwork.
